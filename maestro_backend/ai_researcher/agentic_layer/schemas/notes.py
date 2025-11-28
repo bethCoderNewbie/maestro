@@ -1,8 +1,21 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any, Literal, ClassVar, Optional
 from datetime import datetime
+from enum import Enum
 import uuid
 
+# --- NEW ENUMS FOR AGENTIC LOGIC ---
+class NoteType(str, Enum):
+    FLEETING = "fleeting"       # Raw copy-paste or quick thought
+    LITERATURE = "literature"   # Synthesized summary of a source
+    PERMANENT = "permanent"     # Atomic, self-contained idea (Zettelkasten)
+
+class VerificationStatus(str, Enum):
+    UNCHECKED = "unchecked"
+    PASSED = "passed"
+    REVISE = "revise"
+
+# --- EXISTING METADATA (Unchanged) ---
 class SourceMetadata(BaseModel):
     """Metadata about the source of a note."""
     title: Optional[str] = Field(None, description="Title of the source document")
@@ -24,24 +37,51 @@ class SourceMetadata(BaseModel):
     publication_year: Optional[int] = Field(None, description="Publication year as integer")
     doc_id: Optional[str] = Field(None, description="Document ID")
     
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')  # Allow extra fields for backward compatibility with existing data
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
+# --- NEW STRUCTURED ANALYSIS COMPONENT ---
+class NoteAnalysis(BaseModel):
+    """
+    Detailed breakdown of the note content for high-quality synthesis.
+    This replaces the 'blob string' approach for complex notes.
+    """
+    core_argument: Optional[str] = Field(None, description="One sentence summary of the main point.")
+    key_findings: List[str] = Field(default_factory=list, description="List of specific facts or discoveries.")
+    methodology: Optional[str] = Field(None, description="How the information was derived (if scientific).")
+    quotes: List[str] = Field(default_factory=list, description="Verbatim quotes with page/loc references.")
+    critical_analysis: Optional[str] = Field(None, description="Agent's critique of the source's strength/weakness.")
+
+# --- UPGRADED NOTE MODEL ---
 class Note(BaseModel):
     """
-    Represents a single piece of information gathered during research,
-    linked to its source and potential report sections.
+    Represents a single piece of information gathered during research.
+    Enhanced for Multi-Agent verification and synthesis.
     """
     note_id: str = Field(default_factory=lambda: f"note_{uuid.uuid4().hex[:8]}", description="Unique identifier for the note.")
-    content: str = Field(..., description="The textual content of the note.")
-    source_type: Literal["document", "web", "internal"] = Field(..., description="The origin type of the information (document chunk, web search result, agent thought).")
-    source_id: str = Field(..., description="Identifier for the specific source (e.g., chunk_id, URL, agent_name).")
-    source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)  # Remove description to avoid $ref conflict
-    potential_sections: List[str] = Field(default_factory=list, description="List of section IDs from the current outline where this note might be relevant.")
-    created_at: datetime = Field(default_factory=datetime.now, description="Timestamp of when the note was created.")
-    updated_at: datetime = Field(default_factory=datetime.now, description="Timestamp of when the note was last updated.")
-    is_relevant: bool = Field(default=True, description="Flag indicating if the note was deemed relevant during initial research.")
+    
+    # 1. PRIMARY CONTENT (Backward Compatible)
+    content: str = Field(..., description="The main textual content/summary of the note.")
+    
+    # 2. STRUCTURED CONTENT (New - For "Literature" notes)
+    structured_analysis: Optional[NoteAnalysis] = Field(None, description="Structured breakdown for high-value notes.")
+    
+    # 3. SOURCE TRACKING
+    source_type: Literal["document", "web", "internal"] = Field(..., description="The origin type.")
+    source_id: str = Field(..., description="Identifier for the specific source.")
+    source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)
+    
+    # 4. CONTEXT & LINKING
+    potential_sections: List[str] = Field(default_factory=list, description="List of relevant outline section IDs.")
+    note_type: NoteType = Field(default=NoteType.FLEETING, description="The classification of the note.")
+    tags: List[str] = Field(default_factory=list, description="Semantic tags (e.g., #Hallucination, #Ethics).")
+    
+    # 5. AGENT VERIFICATION STATE (New - For the Critic Agent)
+    verification_status: VerificationStatus = Field(default=VerificationStatus.UNCHECKED, description="Status from the Critic Agent.")
+    verification_feedback: Optional[str] = Field(None, description="Feedback or reasoning provided by the Critic Agent.")
+    
+    # 6. TIMESTAMPS
+    created_at: datetime = Field(default_factory=datetime.now, description="Timestamp of creation.")
+    updated_at: datetime = Field(default_factory=datetime.now, description="Timestamp of last update.")
+    is_relevant: bool = Field(default=True, description="Flag indicating relevance.")
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra='forbid')  # Prevent additionalProperties and replace legacy Config
-    # Removed old Pydantic v1 Config to avoid conflict with model_config
-    # class Config:
-    #     pass
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='forbid')

@@ -172,6 +172,8 @@ class NoteAssignmentAgent(BaseAgent):
         active_thoughts: Optional[List[ThoughtEntry]] = None # <-- NEW: Add active thoughts
     ) -> str:
         """Creates the prompt for the LLM call, including active goals and thoughts."""
+        # TODO: Update this method to include the new structured information from the `structured_analysis` field in the `notes_string`.
+        # This will allow the agent to make more informed decisions.
         # Truncate note content to manage prompt size
         notes_string = "\n".join([
             f"Note ID: {note.note_id}\n"

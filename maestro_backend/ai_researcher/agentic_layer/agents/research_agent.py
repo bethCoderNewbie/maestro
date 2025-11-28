@@ -31,7 +31,7 @@ from ai_researcher.agentic_layer.tool_registry import ToolRegistry
 from ai_researcher.core_rag.query_preparer import QueryPreparer, QueryRewritingTechnique # <-- Import QueryPreparer
 from ai_researcher.agentic_layer.schemas.planning import PlanStep, ActionType, ReportSection
 from ai_researcher.agentic_layer.schemas.research import ResearchFindings, ResearchResultResponse, Source
-from ai_researcher.agentic_layer.schemas.notes import Note
+from ai_researcher.agentic_layer.schemas.notes import Note, NoteType
 from ai_researcher.agentic_layer.schemas.goal import GoalEntry # Import GoalEntry
 from ai_researcher.agentic_layer.schemas.thought import ThoughtEntry # Added import
 # from ai_researcher.agentic_layer.context_manager import ContextManager
@@ -39,6 +39,7 @@ from ai_researcher.agentic_layer.schemas.thought import ThoughtEntry # Added imp
 logger = logging.getLogger(__name__) # <-- Initialize logger
 
 class ResearchAgent(BaseAgent):
+    # TODO: Add note_level: NoteType = NoteType.LITERATURE to the run method signature
     """
     Agent responsible for executing research steps: using tools for information
     gathering (document search, web search, calculation) and synthesizing results.
@@ -93,7 +94,7 @@ class ResearchAgent(BaseAgent):
 
     def _default_system_prompt(self) -> str:
         """Generates the default system prompt for the Research Agent."""
-        # Updated prompt to include synthesis task and active goals
+        # Updated prompt to include synthesis task and active goals and structured note generation.
         return """You are a specialized Research Agent. Your primary goal is to gather and synthesize information relevant to a specific research section topic, ensuring alignment with the overall mission goals.
 
 **Active Mission Goals:**
@@ -102,15 +103,46 @@ class ResearchAgent(BaseAgent):
 - Ensure your outputs (notes, synthesis) directly contribute to achieving these active goals. Prioritize information that addresses open goals.
 - Review the 'Recent Thoughts' (if provided in the user prompt) to maintain focus and build on previous insights.
 
-You will be given a section topic/goal and potentially specific focus questions or existing notes.
+You will be given a section topic/goal, a list of focus questions, and the desired 'note_level' for output (FLEETING, LITERATURE, PERMANENT).
 
-**Mode 1: Answering Focus Questions**
+**Instructions for Note Generation:**
+Your primary task is to generate notes in a structured JSON format that directly answer the focus questions, using ONLY the provided search results or existing notes.
+
+**Output Format:**
+You MUST output a JSON object with a single key "notes", containing a list of structured note objects. Each note object MUST adhere to the following schema:
+```json
+{{
+  "content": "string", // The core information of the note.
+  "note_type": "FLEETING" | "LITERATURE" | "PERMANENT", // Reflects the summarization level.
+  "focus_question": "string", // The specific focus question this note answers.
+  "source_type": "document" | "web" | "internal", // Where the information came from.
+  "source_id": "string", // A unique identifier for the source (e.g., doc_id for documents, URL for web, internal ID for synthesis).
+  "source_metadata": {{...}}, // Relevant metadata from the source.
+  "structured_analysis": "string" | null, // *REQUIRED for LITERATURE & PERMANENT notes*. Critical analysis, implications, connection to other notes/goals.
+  "connections": ["string"] | null // *REQUIRED for PERMANENT notes*. Placeholder for connections to other notes (cite by ID).
+}}
+```
+**Guidance based on `note_level`:**
+
+*   **FLEETING Notes:**
+    *   Focus on direct quotes or immediate observations.
+    *   `structured_analysis` and `connections` can be `null`.
+*   **LITERATURE Notes:**
+    *   Summarize and paraphrase information.
+    *   **REQUIRED:** Provide a concise `structured_analysis` that interprets the finding, its significance, or relates it to the section goal.
+    *   `connections` can be `null`.
+*   **PERMANENT Notes:**
+    *   Synthesize information into original insights and arguments.
+    *   **REQUIRED:** Provide a thorough `structured_analysis` that deeply analyzes the finding, its broader implications, and how it connects to the overall mission goals or other key ideas.
+    *   **REQUIRED:** `connections` should be an array of strings, citing the `source_id` of other relevant notes (e.g., `["note_123", "note_456"]`). If no specific connections are identified, return an empty array `[]`.
+
+**Mode 1: Answering Focus Questions (with Note Level)**
 If you receive 'Focus Questions':
 1. Generate relevant search queries based on the section goal AND the focus questions.
 2. Execute searches using available tools (`document_search`, `web_search`).
 3. Analyze the search results (snippets or full documents if necessary via `read_full_document`).
-4. For each piece of information found that DIRECTLY answers a focus question, create a structured "Note".
-5. Return a list of generated Note objects. Focus on accuracy, relevance to the questions, and capturing source info.
+4. For each piece of information found that DIRECTLY answers a focus question, create a structured "Note" object based on the provided `note_level` and the schema above.
+5. Return a JSON object containing a list of generated Note objects. Focus on accuracy, relevance to the questions, and capturing source info.
 
 **Mode 2: Synthesizing Existing Notes**
 If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
@@ -127,7 +159,6 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
 - Use the 'Agent Scratchpad' for context about previous actions or thoughts. Keep your own contributions to the scratchpad concise.
 - Consult 'Recent Thoughts' (if provided) for additional context and focus.
 - **CRITICAL: Base ALL generated notes and synthesis *strictly* on the information found in the provided search results or existing notes. DO NOT use any external knowledge or information not present in the context provided to you.**
-"""
 
     # --- Helper Methods ---
 
@@ -186,7 +217,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
         tool_registry: Optional[ToolRegistry] = None, # <-- Add optional tool_registry override
         all_mission_notes: Optional[List[Note]] = None, # <-- NEW: Add all notes for synthesis trace-back
         active_goals: Optional[List[GoalEntry]] = None, # <-- NEW: Add active goals
-        active_thoughts: Optional[List[ThoughtEntry]] = None # <-- NEW: Add active thoughts
+        active_thoughts: Optional[List[ThoughtEntry]] = None, # <-- NEW: Add active thoughts
+        note_level: NoteType = NoteType.LITERATURE # <-- NEW: Add note_level
     ) -> Tuple[List[Note], Dict[str, Any], Optional[str]]:
         """
         Generates research notes for a specific section, guided by active goals, using the provided tool_registry if available.
@@ -203,6 +235,7 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
             all_mission_notes: Optional list of all notes in the mission (for synthesis trace-back).
             active_goals: Optional list of active GoalEntry objects for the mission.
             active_thoughts: Optional list of ThoughtEntry objects containing recent thoughts.
+            note_level: The desired level of summarization for the generated notes.
 
         Returns:
             A tuple containing:
@@ -370,7 +403,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
                             log_queue=log_queue, # <-- Pass log_queue
                             update_callback=update_callback, # <-- Pass update_callback
                             is_initial_exploration=False, # Assuming structured research here
-                            tool_registry_override=tool_registry # Pass the override
+                            tool_registry_override=tool_registry, # Pass the override
+                            note_level=note_level # Pass note_level
                         )
                     )
 
@@ -391,7 +425,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
                         update_callback=update_callback, # <-- Pass update_callback
                         is_initial_exploration=False, # Assuming structured research here
                         tool_registry_override=tool_registry, # Pass the override
-                        active_thoughts=active_thoughts # <-- ADDED active_thoughts
+                        active_thoughts=active_thoughts, # <-- ADDED active_thoughts
+                        note_level=note_level # Pass note_level
                     )
                 )
 
@@ -562,7 +597,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
                                     feedback_callback=feedback_callback,
                                     log_queue=log_queue, # <-- Pass log_queue
                                     tool_registry_override=tool_registry, # Pass the override
-                                    active_thoughts=active_thoughts # <-- ADDED active_thoughts
+                                    active_thoughts=active_thoughts, # <-- ADDED active_thoughts
+                                    note_level=note_level # Pass note_level
                                 )
                             )
 
@@ -582,7 +618,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
                                     feedback_callback=feedback_callback,
                                     log_queue=log_queue, # <-- Pass log_queue
                                     tool_registry_override=tool_registry, # Pass the override
-                                    active_thoughts=active_thoughts # <-- ADDED active_thoughts
+                                    active_thoughts=active_thoughts, # <-- ADDED active_thoughts
+                                    note_level=note_level # Pass note_level
                                 )
                             )
 
@@ -652,7 +689,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
         tool_registry: Optional[ToolRegistry] = None,
         model: Optional[str] = None, # <<< RE-ADD model parameter >>>
         active_goals: Optional[List[GoalEntry]] = None, # <-- ADD active_goals
-        active_thoughts: Optional[List[ThoughtEntry]] = None # <-- ADD active_thoughts
+        active_thoughts: Optional[List[ThoughtEntry]] = None, # <-- ADD active_thoughts
+        note_level: NoteType = NoteType.LITERATURE # <-- NEW: Add note_level
     ) -> Tuple[List[Tuple[Note, str]], Dict[str, Any], Optional[str]]:
         """
         Similar to run(), but specifically for search-based research with focus questions,
@@ -760,7 +798,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
                         tool_registry_override=tool_registry,
                         model=model, # <<< RE-ADD model parameter pass >>>
                         active_goals=active_goals, # <-- Pass active_goals
-                        active_thoughts=active_thoughts # <-- Pass active_thoughts
+                        active_thoughts=active_thoughts, # <-- Pass active_thoughts
+                        note_level=note_level # Pass note_level
                     )
                 )
 
@@ -781,7 +820,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
                         tool_registry_override=tool_registry,
                         model=model, # <<< RE-ADD model parameter pass >>>
                         active_goals=active_goals, # <-- Pass active_goals
-                        active_thoughts=active_thoughts # <-- Pass active_thoughts
+                        active_thoughts=active_thoughts, # <-- Pass active_thoughts
+                        note_level=note_level # Pass note_level
                     )
                 )
 
@@ -790,6 +830,8 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
             note_processing_results = await asyncio.gather(*note_generation_tasks)
 
             # Collect results including context
+            # TODO: This method returns a tuple of (Note, context). The Note object will be in the new format.
+            # Ensure that any downstream processing of this method's output is updated to handle the new Note schema.
             for note, note_model_details, context_used in note_processing_results: # Unpack 3 values
                 if note and context_used is not None: # Ensure context was captured
                     notes_with_context.append((note, context_used))
@@ -904,6 +946,7 @@ Now, generate the questions for the provided research request.
 
     # --- NEW: Method for Initial Question Exploration ---
     async def explore_question(
+        # TODO: Add note_level: NoteType = NoteType.LITERATURE to the explore_question method signature
         self,
         question: str,
         mission_id: str,
@@ -918,7 +961,8 @@ Now, generate the questions for the provided research request.
         update_callback: Optional[Callable] = None, # <-- ADD update_callback (4-arg)
         tool_registry: Optional[ToolRegistry] = None, # <-- Add optional tool_registry override
         active_thoughts: Optional[List[ThoughtEntry]] = None, # <-- NEW: Add active thoughts
-        active_goals: Optional[List[GoalEntry]] = None # <-- NEW: Add active goals (needed for prompt)
+        active_goals: Optional[List[GoalEntry]] = None, # <-- NEW: Add active goals (needed for prompt)
+        note_level: NoteType = NoteType.LITERATURE # <-- NEW: Add note_level
     ) -> Tuple[List[Tuple[Note, str]], List[str], Optional[str], Dict[str, Any]]:
         """
         Explores a single question during the initial research phase using the provided tool_registry if available.
@@ -1081,6 +1125,7 @@ Now, generate the questions for the provided research request.
                 # --- End get doc_id ---
 
                 note_generation_tasks.append(
+
                     self._process_single_result(
                         section=temp_section_for_notes, # Pass dummy section
                         focus_questions=[question], # Pass the question being explored
@@ -1257,7 +1302,8 @@ If no relevant sub-questions are identified, return an empty list for "sub_quest
         if not chunks: return [], False
         
         # Combine chunk texts for evaluation
-        chunk_content = "\n\n---CHUNK---\n\n".join([chunk.get("text", "") for chunk in chunks[:5]])  # Use first 5 chunks for evaluation
+        chunk_content = "\n\n---
+\n".join([chunk.get("text", "") for chunk in chunks[:5]])  # Use first 5 chunks for evaluation
         
         # Use metadata from first chunk to read document, passing callback and registry override
         first_chunk_metadata = chunks[0].get("metadata", {})
@@ -1468,7 +1514,8 @@ If no relevant sub-questions are identified, return an empty list for "sub_quest
                     current_pos = split_end
             else:
                 # Add window as-is
-                window_content = full_content_original[merged_window["start"]:merged_window["end"]]
+                window_content = full_content_original[merged_window["start"]:
+merged_window["end"]]
                 window_obj = {
                     "content": window_content,
                     "beginning_omitted": merged_window["start"] > 0,
@@ -1548,7 +1595,7 @@ If no relevant sub-questions are identified, return an empty list for "sub_quest
             # Ensure at least one query is returned (fallback to initial)
             if not prepared_queries:
                 logger.warning(f"Query preparation returned no queries for section {section.section_id}. Falling back to initial query.")
-                prepared_queries = [initial_query] # Fallback to the initial query (which might be focus Q or description)
+                prepared_queries = [initial_query] # Fallback to the initial query (which might be focus Q or description) 
                 
             logger.info(f"Prepared queries for section {section.section_id}: {prepared_queries}")
             return prepared_queries, model_details_list # Return list of details
@@ -1946,6 +1993,16 @@ Important considerations:
                 
                 if response and response.choices and response.choices[0].message.content:
                     evaluation = response.choices[0].message.content.strip().upper()
+                    # TODO: Add logic to generate structured notes based on note_level.
+                    # This will involve creating a dynamic prompt that asks the LLM to generate a JSON object
+                    # matching the new Note schema. The prompt will change based on whether the note_level
+                    # is FLEETING, LITERATURE, or PERMANENT.
+
+                    # For LITERATURE and PERMANENT notes, the prompt should ask for the structured_analysis field to be filled.
+                    # For PERMANENT notes, the prompt should also ask for potential connections to other notes (this will be a placeholder for now).
+
+                    # After getting the JSON response from the LLM, parse it and create a Note object.
+                    # The existing logic for creating a Note object will need to be replaced.
                     
                     if "SUFFICIENT" in evaluation:
                         needs_full_doc = False
@@ -2135,7 +2192,7 @@ Content Source Details:
 
 Content to Analyze (first {get_research_note_content_limit(self.mission_id)} chars):
 ---
-{content_to_process[:get_research_note_content_limit(self.mission_id)]}...
+{content_to_process[:get_research_note_content_limit(self.mission_id)]}... 
 ---
 
 Task: Extract all information directly relevant to answering the specific research question: "{question_being_explored}". Synthesize these findings into a detailed and comprehensive note. Ensure all key details, context, and nuances from the source content that help answer the question are included. 
@@ -2143,7 +2200,7 @@ Task: Extract all information directly relevant to answering the specific resear
 **CRITICAL INSTRUCTIONS:**
 1. Extract information *only* from the 'Content to Analyze' provided above. Do not infer, assume, or add any information not explicitly present in the text.
 2. Pay special attention to any "Preferred Source Types" mentioned in the Active Goals. If the user has specified preferred source types (e.g., "academic literature", "legal sources", "state law"), prioritize information that aligns with these source preferences.
-3. Output ONLY the detailed note content.
+3. Output ONLY the detailed note content. 
 4. If the content is IRRELEVANT to the question: Return the text "Content reviewed, but not relevant to the question."
 """
         else:
@@ -2484,7 +2541,7 @@ Task: Extract all key information relevant to the section goal (and focus questi
                                 # Call with log_queue and formatted_message arguments
                                 feedback_callback(log_queue, formatted_message)
                             except Exception as cb_err:
-                                logger.error(f"Feedback callback failed for note_updated: {cb_err}", exc_info=False)
+                                logger.error(f"Feedback callback failed for note_updated: {cb_err}", exc_info=False) # Don't log full trace for callback errors
                         # --- End Feedback ---
                         # Return the new note, its details, and the context used (full text)
                         return full_note, full_model_details, context_used_for_note

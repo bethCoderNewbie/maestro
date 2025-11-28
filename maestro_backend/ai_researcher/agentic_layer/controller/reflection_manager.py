@@ -62,6 +62,8 @@ class ReflectionManager:
         Returns:
             A ReflectionOutput object with the agent's analysis and suggestions, or None if the process fails.
         """
+        # TODO: After the ReflectionAgent runs, check the verification_status of the notes.
+        # If a note is marked as REVISE, trigger a new research cycle for that section.
         logger.info(f"Running reflection for section {section_id} (Pass {pass_num+1})...")
         
         # Get mission context
@@ -139,11 +141,11 @@ class ReflectionManager:
             # Update stats
             if model_details:
                 await self.controller.context_manager.update_mission_stats(mission_id, model_details, log_queue, update_callback)
-                
+                    
             # Store generated thought if available
             if reflection_output and reflection_output.generated_thought:
                 await self.controller.context_manager.add_thought(mission_id, "ReflectionAgent", reflection_output.generated_thought)
-                
+                    
             return reflection_output
             
         except Exception as e:

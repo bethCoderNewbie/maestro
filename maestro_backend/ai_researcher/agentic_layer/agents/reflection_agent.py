@@ -55,6 +55,8 @@ class ReflectionAgent(BaseAgent):
 
     def _format_notes_for_prompt(self, notes: List[Note]) -> str:
         """Formats the list of Note objects into a string for the prompt."""
+        # TODO: Update this method to format the new structured note.
+        # It should include the core_argument, key_findings, and other fields from structured_analysis when available.
         if not notes:
             return "No notes available for this section yet."
         note_lines = []
@@ -103,6 +105,7 @@ class ReflectionAgent(BaseAgent):
         Returns:
             The formatted prompt string.
         """
+        # TODO: Update this prompt to instruct the agent to analyze the structured_analysis field of the notes.
         # Section details are now passed directly as arguments
         current_outline_str = "Outline not available."
         if mission_context.plan and mission_context.plan.report_outline:
@@ -440,6 +443,12 @@ Provide ONLY a single JSON object conforming EXACTLY to the ReflectionOutput sch
                 logger.warning(f"LLM suggested sections for review: {response_model.sections_needing_review}. Overriding to empty list.")
                 response_model.sections_needing_review = []
             # --- End override ---
+
+            # TODO: Implement "Critic Agent" logic here.
+            # After a successful response, analyze the `overall_assessment` and `critical_issues_summary`.
+            # If issues are found, loop through the notes_for_section and update their
+            # `verification_status` to `REVISE` and `verification_feedback` with the criticism.
+            # The `ReflectionManager` will then be responsible for acting on this status.
 
             logger.info(f"ReflectionAgent completed successfully for section {section_id}.")
             # Log key decisions from the updated schema

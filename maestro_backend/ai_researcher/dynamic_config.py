@@ -81,6 +81,10 @@ def get_max_suggestions_per_batch(mission_id: Optional[str] = None) -> int:
     """
     return get_setting_with_fallback("max_suggestions_per_batch", 3, int, mission_id)
 
+# TODO: Add a new function to get the default note_level for "Progressive Summarization".
+# def get_default_note_level(mission_id: Optional[str] = None) -> str:
+#     return get_setting_with_fallback("default_note_level", "literature", str, mission_id)
+
 def get_writing_mode_doc_results(mission_id: Optional[str] = None) -> int:
     """Get number of document results for writing mode searches."""
     return get_setting_with_fallback("writing_mode_doc_results", 5, int, mission_id)

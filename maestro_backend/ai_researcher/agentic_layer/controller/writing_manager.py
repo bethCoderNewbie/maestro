@@ -66,6 +66,8 @@ class WritingManager:
             logger.error(f"Cannot start writing phase: Mission context or plan not found for {mission_id}.")
             return False
 
+        # TODO: Confirm that this logic correctly handles the new structured Note objects.
+        # The `get_notes` method on the context manager should return the new Note objects.
         # Convert FullNoteAssignments to the Dict[str, List[Note]] format expected by _write_section_content
         # This requires looking up Note objects based on the IDs in AssignedNotes.
         notes_for_writing: Dict[str, List[Note]] = {}
@@ -439,6 +441,8 @@ class WritingManager:
         passing appropriate context (notes OR written content) based on section strategy,
         and storing the result.
         """
+        # TODO: This method will need to pass the new structured Note objects to the WritingAgent.
+        # The WritingAgent's `run` method will need to be updated to handle these new objects.
         action_name = f"Write Section: {section.section_id} (Pass {pass_num + 1})"
         input_desc = f"Section: '{section.title}'"
         if revision_suggestions:

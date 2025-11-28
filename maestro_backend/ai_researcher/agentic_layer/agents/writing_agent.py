@@ -133,16 +133,16 @@ class WritingAgent(BaseAgent):
         if not text:
             return ""
 
-        # Regex to find sequences of two or more citation brackets: \[([^\]]+)\]
-        # (\[[^\]]+\])     - Captures a single citation bracket like [abc] or [123]
+        # Regex to find sequences of two or more citation brackets: \[([^]]+)\]
+        # ( \[ [^]]+ \] )     - Captures a single citation bracket like [abc] or [123]
         # (?:...)         - Non-capturing group for repetition
         # \s*             - Optional whitespace between brackets
-        # (?:\s*\[[^\]]+\])+ - Matches one or more subsequent brackets with optional whitespace
-        citation_pattern = re.compile(r"(\[[^\]]+\])((?:\s*\[[^\]]+\])+)")
+        # (?:\s*\[[^]]+\])+ - Matches one or more subsequent brackets with optional whitespace
+        citation_pattern = re.compile(r"(\[[^]]+\])((?:\s*\[[^]]+\])+)")
 
         def replace_match(match):
             # Extract all citation brackets from the full match
-            all_brackets = re.findall(r"\[([^\]]+)\]", match.group(0))
+            all_brackets = re.findall(r" \[ ([^]]+) \] ", match.group(0))
 
             # Define a sort key: try converting to int, fallback to string
             def sort_key(item):
@@ -165,6 +165,10 @@ class WritingAgent(BaseAgent):
 
     def _default_system_prompt(self) -> str:
         """Generates the default system prompt for the Writing Agent."""
+        # TODO: Update this method to format the new structured note.
+        # It should iterate through the notes and format the `structured_analysis` field
+        # (including `core_argument`, `key_findings`, `methodology`, `critical_analysis`, and `quotes`)
+        # into a readable format for the LLM.
         # Note: Citation placeholder format is defined here: [doc_id]
         return r"""You are an expert academic writer. Your task is to write or revise a specific section or subsection of a research report. You will be provided with the section's details (ID, title, goal, strategy), the full report outline, the title of the parent section (if applicable), relevant research notes, potentially content from previously written sections, possibly revision suggestions, and the overall mission goals.
 
@@ -261,12 +265,16 @@ class WritingAgent(BaseAgent):
         return formatted_text
 
     def _format_notes_for_writing(self, notes: List[Note], mission_id: Optional[str] = None) -> str:
-        """Formats the list of Note objects, grouped by source, into a string for the writing prompt.
+        """Formats the list of Note objects, grouped by source, into a string for the writing prompt. 
         
         Args:
             notes: List of Note objects to format
             mission_id: Optional mission ID to get reference mapping from mission context
         """
+        # TODO: Update this method to format the new structured note.
+        # It should iterate through the notes and format the `structured_analysis` field
+        # (including `core_argument`, `key_findings`, `methodology`, `critical_analysis`, and `quotes`)
+        # into a readable format for the LLM.
         if not notes:
             return "## Research Notes:\n\nNo relevant notes were provided for this section.\n"
 
@@ -727,7 +735,7 @@ class WritingAgent(BaseAgent):
     - **Use proper LaTeX syntax** with single dollar signs `$...$` for inline math and double dollar signs `$$...$$` for display math.
     - **NEVER use square brackets [ ] or parentheses \( \) for math delimiters** - always use dollar signs.
     - Use LaTeX for all mathematical expressions, Greek letters, subscripts, and superscripts.
-    - Example: `$\\lambda$`, `$E = mc^2$`, `$$\\int_{{0}}^{{\\infty}} f(x) dx$$`
+    - Example: `$\lambda$`, `$E = mc^2$`, `$$\int_{{0}}^{{\infty}} f(x) dx$$`
 7.  **CRITICAL:** Output *only* the generated introductory paragraph text. Do NOT include headings, titles, meta-commentary, agent thoughts, or scratchpad content. Do NOT prefix your response with "Agent Scratchpad:" or any similar text.
 """
 

@@ -61,6 +61,8 @@ class ResearchManager:
         Returns the list of relevant notes gathered and the final agent scratchpad content.
         Accepts an optional feedback_callback for UI updates.
         """
+        # TODO: Get the note_level from config or Planner Agent's decision
+        # and pass it to research_agent.explore_question.
         logger.info(f"--- Starting Initial Research Phase for mission {mission_id} ---")
         
         # Import dynamic config functions to get mission-specific settings
@@ -350,7 +352,8 @@ class ResearchManager:
                         mission_id=mission_id, agent_name=self.controller.research_agent.agent_name,
                         action="Explore Question Task Execution",
                         input_summary="N/A", status="failure", error_message=f"Task execution error: {task_exec_e}",
-                        log_queue=log_queue, update_callback=update_callback
+                        log_queue=log_queue,
+                        update_callback=update_callback
                     )
 
             # Apply Scratchpad Update (Last Write Wins in Batch)
@@ -388,7 +391,7 @@ class ResearchManager:
         Generates the first set of high-level research questions, informed by an initial document search.
         Accepts log_queue and update_callback for logging.
         """
-        logger.info(f"Generating initial high-level research questions for: '{user_request[:50]}...'")
+        logger.info(f"Generating initial high-level research questions for: '{user_request[:50]}...' ")
         
         # Step 1: Initial Document Search (Conditional)
         search_context_str = "Initial document search skipped by configuration."
@@ -495,6 +498,9 @@ Instructions:
         logger.info(f"Generating preliminary outline for mission {mission_id} using initial research findings and tool selection: {tool_selection}...")
         mission_context = self.controller.context_manager.get_mission_context(mission_id)
 
+        # TODO: Update this to handle the new structured notes.
+        # It could use the `core_argument` and `key_findings` to get a sense of the note's content,
+        # or it could serialize the `structured_analysis` to a string.
         # Calculate Total Character Count and Check Limit
         total_chars = sum(len(note.content) for note in initial_notes)
         char_limit = get_max_planning_context_chars(mission_id)
@@ -811,6 +817,8 @@ Instructions:
         Includes research, reflection, and potential outline revision between rounds.
         Supports resuming from checkpoint data.
         """
+        # TODO: Get the note_level from config or Planner Agent's decision
+        # and pass it to research_agent.run.
         # Import dynamic config functions to get mission-specific settings
         from ai_researcher.dynamic_config import (
             get_structured_research_rounds,
@@ -1123,7 +1131,7 @@ Instructions:
                                                 logger.info(f"  Section {section_id} has reached max notes limit ({max_notes}). Marking as fully refined.")
                                                 section_fully_refined = True
                                         else:
-                                            logger.debug(f"  No new note IDs to associate with section {section_id}.")
+                                            logger.info(f"  No new note IDs to associate with section {section_id}.")
                                     else:
                                         logger.error(f"Could not find section {section_id} in plan to associate notes.")
                                 else:
@@ -1352,8 +1360,11 @@ Instructions:
             try:
                 # Prepare query for reranker (use section title and description)
                 reranker_query = f"{section.title}\n{section.description}"
-                logger.debug(f"  Reranking {len(all_notes)} notes for section '{section.section_id}' with query: '{reranker_query[:100]}...'")
+                logger.debug(f"  Reranking {len(all_notes)} notes for section '{section.section_id}' with query: '{reranker_query[:100]}...' ")
 
+                # TODO: Update the reranker to handle the new structured notes.
+                # This might involve converting the structured notes to a string representation
+                # before passing them to the reranker.
                 # Call reranker
                 reranked_results_with_scores = self.controller.reranker.rerank(
                     query=reranker_query,

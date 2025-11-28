@@ -1,4 +1,3 @@
-import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Bot, Activity, ChevronDown } from 'lucide-react';

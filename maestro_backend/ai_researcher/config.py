@@ -8,6 +8,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 # Load environment variables from .env file
 load_dotenv()
 
+# TODO: Add a new setting for the default note_level for "Progressive Summarization".
+# This will be a new function in dynamic_config.py and a new environment variable.
+# For example:
+# DEFAULT_NOTE_LEVEL = os.getenv("DEFAULT_NOTE_LEVEL", "literature")
+
 # --- Timezone Configuration ---
 try:
     # Get the timezone name from the environment variable 'TZ'
