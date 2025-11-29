@@ -311,7 +311,7 @@ security maturity modeling.
 ... [rest of the PDF content] ...
     """
     # Read the actual full content from the MARKDOWN file to mock accurately
-    md_path = Path("ai_researcher/data/processed/markdown/cd8e859b.md") # Use correct hash filename
+    md_path = Path("maestro_backend/ai_researcher/data/processed/markdown/cd8e859b.md") # Use correct hash filename
     pdf_filename_meta = "Adaptable Security Maturity Assessment and Standardization for Digital SMEs.pdf" # Filename from metadata
     try:
         # This uses a synchronous read for test setup simplicity
@@ -535,127 +535,65 @@ security maturity modeling.
 #     assert 200 < len(merged_window["content"]) < 500 # Rough check based on window size 300
 
 
-# --- Tests for _generate_note_from_content ---
+    # --- Tests for structured note generation ---
 
 @pytest.mark.asyncio
-async def test_generate_note_relevant(research_agent):
-    """Test note generation when LLM returns relevant content."""
+async def test_process_single_result_generates_structured_note(research_agent):
+    """Test that _process_single_result generates a structured note correctly."""
     # 1. Arrange
-    # Mock LLM to return plain text content directly
-    mock_llm_response_content = "This is the relevant note content."
+    mock_llm_response_json = {
+        "content": "This is the relevant note content.",
+        "note_type": "LITERATURE",
+        "focus_question": "Test question",
+        "source_type": "document",
+        "source_id": "window_test",
+        "source_metadata": {"beginning_omitted": False, "end_omitted": False},
+        "structured_analysis": "This is a test analysis.",
+        "connections": []
+    }
     mock_choice = MagicMock()
-    mock_choice.message.content = mock_llm_response_content
+    mock_choice.message.content = json.dumps(mock_llm_response_json)
     mock_llm_response_obj = MagicMock()
     mock_llm_response_obj.choices = [mock_choice]
-    # Configure the agent's mocked _call_llm
     research_agent._call_llm.return_value = (mock_llm_response_obj, {"model_used": "test_model"})
 
+    result_item = {
+        "content": "Some source text",
+        "source_id": "window_test",
+        "metadata": {"beginning_omitted": False, "end_omitted": False}
+    }
+
     # 2. Act
-    note, model_details = await research_agent._generate_note_from_content(
-        question_being_explored="Test question",
-        section_id="s1",
-        section_description="Test section",
+    note, model_details, _ = await research_agent._process_single_result(
+        section=MagicMock(section_id="s1", description="Test section"),
         focus_questions=["Test question"],
-        source_type="document_window", # This will be mapped to 'document'
-        source_id="window_test",
-        source_metadata={"beginning_omitted": False, "end_omitted": False},
-        content_to_process="Some source text",
-        is_initial_exploration=True
+        active_goals=[],
+        active_thoughts=[],
+        result_item=result_item,
+        source_type="document_window",
+        is_initial_exploration=True,
     )
 
     # 3. Assert
     assert note is not None
     assert isinstance(note, Note)
-    assert note.content == "This is the relevant note content." # Check against plain text
-    assert note.source_type == "document" # Check mapping
+    assert note.content == "This is the relevant note content."
+    assert note.note_type.name == "LITERATURE"
+    assert note.source_type == "document"
+    assert note.structured_analysis is not None
+    assert note.structured_analysis.core_argument == "This is a test analysis."
     assert model_details == {"model_used": "test_model"}
     research_agent._call_llm.assert_awaited_once()
-    # Check prompt includes metadata JSON
     call_args = research_agent._call_llm.call_args
-    prompt_arg = call_args.kwargs['user_prompt'] # Access via kwargs
-    assert '"beginning_omitted": false' in prompt_arg
-    assert '"end_omitted": false' in prompt_arg
-
-
-@pytest.mark.asyncio
-async def test_generate_note_irrelevant(research_agent):
-    """Test note generation when LLM indicates irrelevance by returning empty content."""
-    # 1. Arrange
-    # Mock LLM to return empty string
-    mock_llm_response_content = ""
-    mock_choice = MagicMock()
-    mock_choice.message.content = mock_llm_response_content
-    mock_llm_response_obj = MagicMock()
-    mock_llm_response_obj.choices = [mock_choice]
-    research_agent._call_llm.return_value = (mock_llm_response_obj, {"model_used": "test_model"})
-
-    # 2. Act
-    note, model_details = await research_agent._generate_note_from_content(
-        question_being_explored="Test question", section_id="s1", section_description="Test section",
-        focus_questions=["Test question"], source_type="web", source_id="http://example.com",
-        source_metadata={}, content_to_process="Irrelevant text", is_initial_exploration=True
-    )
-
-    # 3. Assert
-    assert note is None # Should not create a note if content is empty
-    assert model_details == {"model_used": "test_model"}
-    research_agent._call_llm.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_generate_note_llm_error(research_agent):
-    """Test note generation when the LLM call itself fails."""
-    # 1. Arrange
-    # Mock LLM call to raise an exception
-    research_agent._call_llm.side_effect = Exception("LLM API Error")
-
-    # 2. Act
-    note, model_details = await research_agent._generate_note_from_content(
-        question_being_explored="Test question", section_id="s1", section_description="Test section",
-        focus_questions=["Test question"], source_type="web", source_id="http://example.com",
-        source_metadata={}, content_to_process="Some text", is_initial_exploration=True
-    )
-
-    # 3. Assert
-    assert note is None # Should fail and return None
-    assert model_details is None # No model details if call failed
-    research_agent._call_llm.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_generate_note_context_flags_in_prompt(research_agent):
-    """Test that context flags are correctly included in the prompt's metadata."""
-    # 1. Arrange
-    # Mock LLM to return empty string (we only care about the prompt)
-    mock_llm_response_content = ""
-    mock_choice = MagicMock()
-    mock_choice.message.content = mock_llm_response_content
-    mock_llm_response_obj = MagicMock()
-    mock_llm_response_obj.choices = [mock_choice]
-    research_agent._call_llm.return_value = (mock_llm_response_obj, {"model_used": "test_model"})
-
-    source_metadata_flags = {"beginning_omitted": True, "end_omitted": False, "other": "data"}
-
-    # 2. Act
-    await research_agent._generate_note_from_content(
-        question_being_explored="Test question", section_id="s1", section_description="Test section",
-        focus_questions=["Test question"], source_type="document_window", source_id="window_flag_test",
-        source_metadata=source_metadata_flags, content_to_process="Some text", is_initial_exploration=False # Use structured phase prompt
-    )
-
-    # 3. Assert
-    research_agent._call_llm.assert_awaited_once()
-    call_args = research_agent._call_llm.call_args
-    # Access prompt via keyword arguments
-    assert 'user_prompt' in call_args.kwargs, "user_prompt not found in LLM call keyword arguments"
     prompt_arg = call_args.kwargs['user_prompt']
+    # Verify key elements are in the prompt
+    assert "window_test" in prompt_arg  # source_id
+    assert "Test question" in prompt_arg  # focus question
+    assert "LITERATURE" in prompt_arg  # note level
 
-    # Check that the metadata JSON within the prompt includes the flags
-    assert '"beginning_omitted": true' in prompt_arg
-    assert '"end_omitted": false' in prompt_arg
-    assert '"other": "data"' in prompt_arg
-    # Ensure the old "Context Note:" string is NOT present
-    assert "Context Note:" not in prompt_arg
+
+
+
 
 
 # --- NEW TEST ---
@@ -666,7 +604,7 @@ async def test_extract_content_windows_real_markdown_merging(research_agent, mon
     Uses 1f8c82f6.md and chunks 10, 11, 12.
     """
     # 1. Arrange
-    markdown_path = Path("ai_researcher/data/processed/markdown/1f8c82f6.md")
+    markdown_path = Path("maestro_backend/ai_researcher/data/processed/markdown/1f8c82f6.md")
     pdf_filename_meta = "Benders-Decomposition-with-Delayed-Disaggregation-_2024_European-Journal-of-.pdf" # From metadata
     doc_id = "1f8c82f6"
 

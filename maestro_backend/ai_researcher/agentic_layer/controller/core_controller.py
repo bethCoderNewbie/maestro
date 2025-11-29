@@ -27,6 +27,7 @@ from ai_researcher.agentic_layer.agents.reflection_agent import ReflectionAgent
 from ai_researcher.agentic_layer.agents.messenger_agent import MessengerAgent
 from ai_researcher.agentic_layer.agents.writing_reflection_agent import WritingReflectionAgent
 from ai_researcher.agentic_layer.agents.note_assignment_agent import NoteAssignmentAgent
+from ai_researcher.agentic_layer.agents.notes_critic_agent import NotesCriticAgent
 
 # Import core RAG components
 from ai_researcher.core_rag.query_strategist import QueryStrategist
@@ -50,6 +51,7 @@ from ai_researcher.agentic_layer.controller.writing_manager import WritingManage
 from ai_researcher.agentic_layer.controller.reflection_manager import ReflectionManager
 from ai_researcher.agentic_layer.controller.user_interaction import UserInteractionManager
 from ai_researcher.agentic_layer.controller.report_generator import ReportGenerator
+from ai_researcher.agentic_layer.controller.note_critic_manager import NoteCriticManager
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +200,7 @@ class AgentController:
         self.reflection_agent = ReflectionAgent(self.model_dispatcher, controller=self)
         self.writing_reflection_agent = WritingReflectionAgent(self.model_dispatcher, controller=self)
         self.note_assignment_agent = NoteAssignmentAgent(self.model_dispatcher, controller=self)
+        self.notes_critic_agent = NotesCriticAgent(self.model_dispatcher, controller=self)
         self.messenger_agent = MessengerAgent(self.model_dispatcher, controller=self)
 
         # Initialize component managers
@@ -206,6 +209,7 @@ class AgentController:
         self.reflection_manager = ReflectionManager(self)
         self.user_interaction_manager = UserInteractionManager(self)
         self.report_generator = ReportGenerator(self)
+        self.note_critic_manager = NoteCriticManager(self)
 
         logger.info("AgentController initialized with agents, context manager, tool registry.")
         # Settings now loaded from user configuration dynamically
@@ -1176,6 +1180,24 @@ Make sure to address the user's specific concerns and suggestions."""
                 if self.context_manager.get_mission_context(mission_id).status != "failed":
                     await self.context_manager.update_mission_status(mission_id, "failed", "Research plan execution failed.")
                 return
+
+            # Phase 2c: Note Critique & Verification
+            try:
+                logger.info(f"Starting Note Critique phase for mission {mission_id}...")
+                await self.note_critic_manager.critique_all_notes(
+                    mission_id=mission_id,
+                    log_queue=log_queue,
+                    update_callback=update_callback
+                )
+                logger.info(f"Note Critique phase completed for mission {mission_id}.")
+            except Exception as critique_e:
+                logger.error(f"Error during note critique phase: {critique_e}", exc_info=True)
+                # We don't abort, just log error, as this is an enhancement
+                await self.context_manager.log_execution_step(
+                    mission_id=mission_id, agent_name="NoteCriticManager", action="Critique All Notes",
+                    status="failure", error_message=f"Critique failed: {critique_e}",
+                    log_queue=log_queue, update_callback=update_callback
+                )
 
             # Phase 3: Prepare Notes for Writing (Conditional based on config) 
             active_goals = self.context_manager.get_active_goals(mission_id)

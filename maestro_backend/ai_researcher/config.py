@@ -20,10 +20,10 @@ try:
     timezone_name = os.getenv("TZ", "UTC")
     # Create a ZoneInfo object from the timezone name.
     SERVER_TIMEZONE = ZoneInfo(timezone_name)
-    print(f"✅ Timezone configured to: {timezone_name}")
+    print(f"[OK] Timezone configured to: {timezone_name}")
 except ZoneInfoNotFoundError:
     # If the provided timezone name is invalid, fall back to UTC and log a warning.
-    print(f"⚠️ Invalid timezone '{timezone_name}' found in TZ environment variable. Defaulting to UTC.")
+    print(f"[WARN] Invalid timezone '{timezone_name}' found in TZ environment variable. Defaulting to UTC.")
     SERVER_TIMEZONE = ZoneInfo("UTC")
 
 def get_current_time() -> datetime:

@@ -15,7 +15,7 @@ from ai_researcher.dynamic_config import (
 from ai_researcher.agentic_layer.async_context_manager import ExecutionLogEntry
 from ai_researcher.agentic_layer.tool_registry import ToolRegistry
 from ai_researcher.agentic_layer.schemas.planning import SimplifiedPlan, ReportSection, SimplifiedPlanResponse
-from ai_researcher.agentic_layer.schemas.notes import Note
+from ai_researcher.agentic_layer.schemas.notes import Note, NoteType
 from ai_researcher.agentic_layer.schemas.reflection import ReflectionOutput, SuggestedSubsectionTopic
 from ai_researcher.agentic_layer.agents.note_assignment_agent import AssignedNotes
 
@@ -90,6 +90,17 @@ class ResearchManager:
                 tool_selection = {'local_rag': True, 'web_search': True}
                 
         logger.info(f"Initial Research Phase using tool selection: {tool_selection}")
+        
+        # Get note_level from mission metadata/params
+        note_level = NoteType.LITERATURE # Default
+        if mission_context and mission_context.research_params:
+            level_str = mission_context.research_params.get("note_level", "literature")
+            try:
+                note_level = NoteType(level_str.lower())
+            except ValueError:
+                logger.warning(f"Invalid note_level '{level_str}', defaulting to LITERATURE")
+        
+        logger.info(f"Initial Research Phase using note_level: {note_level}")
         
         # Create filtered tool registry based on selection
         filtered_tool_registry = ToolRegistry()
@@ -250,7 +261,8 @@ class ResearchManager:
                                 feedback_callback=feedback_callback,
                                 log_queue=log_queue,
                                 update_callback=update_callback,
-                                tool_registry=filtered_tool_registry
+                                tool_registry=filtered_tool_registry,
+                                note_level=note_level
                             )
                         return (q, d, result_tuple)
                     except Exception as task_e:
@@ -945,6 +957,16 @@ Instructions:
                     logger.info(f"Mission {mission_id} stopped/paused during research plan execution (Round {round_num}). Stopping section processing.")
                     return False
                 
+                # Get current note_level (dynamic check per section to support progressive toggling)
+                mission_ctx_latest = self.controller.context_manager.get_mission_context(mission_id)
+                note_level = NoteType.LITERATURE
+                if mission_ctx_latest and mission_ctx_latest.research_params:
+                    level_str = mission_ctx_latest.research_params.get("note_level", "literature")
+                    try:
+                        note_level = NoteType(level_str.lower())
+                    except ValueError:
+                        pass # Keep default
+                
                 section_id = section.section_id
                 strategy = section.research_strategy
 
@@ -1052,7 +1074,8 @@ Instructions:
                             tool_registry=filtered_tool_registry,
                             all_mission_notes=all_mission_notes,
                             active_goals=active_goals,
-                            active_thoughts=active_thoughts
+                            active_thoughts=active_thoughts,
+                            note_level=note_level
                         )
 
                         # ADD AGENT STEP LOGGING

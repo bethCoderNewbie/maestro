@@ -13,7 +13,8 @@ from collections import defaultdict, deque # Added defaultdict and deque
 from ai_researcher.agentic_layer.utils.json_utils import (
     parse_llm_json_response,
     sanitize_json_string,
-    parse_json_string_recursively
+    parse_json_string_recursively,
+    extract_non_schema_fields
 )
 
 # Use absolute imports starting from the top-level package 'ai_researcher'
@@ -31,7 +32,7 @@ from ai_researcher.agentic_layer.tool_registry import ToolRegistry
 from ai_researcher.core_rag.query_preparer import QueryPreparer, QueryRewritingTechnique # <-- Import QueryPreparer
 from ai_researcher.agentic_layer.schemas.planning import PlanStep, ActionType, ReportSection
 from ai_researcher.agentic_layer.schemas.research import ResearchFindings, ResearchResultResponse, Source
-from ai_researcher.agentic_layer.schemas.notes import Note, NoteType
+from ai_researcher.agentic_layer.schemas.notes import Note, NoteType, NoteAnalysis
 from ai_researcher.agentic_layer.schemas.goal import GoalEntry # Import GoalEntry
 from ai_researcher.agentic_layer.schemas.thought import ThoughtEntry # Added import
 # from ai_researcher.agentic_layer.context_manager import ContextManager
@@ -39,7 +40,7 @@ from ai_researcher.agentic_layer.schemas.thought import ThoughtEntry # Added imp
 logger = logging.getLogger(__name__) # <-- Initialize logger
 
 class ResearchAgent(BaseAgent):
-    # TODO: Add note_level: NoteType = NoteType.LITERATURE to the run method signature
+
     """
     Agent responsible for executing research steps: using tools for information
     gathering (document search, web search, calculation) and synthesizing results.
@@ -159,8 +160,7 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
 - Use the 'Agent Scratchpad' for context about previous actions or thoughts. Keep your own contributions to the scratchpad concise.
 - Consult 'Recent Thoughts' (if provided) for additional context and focus.
 - **CRITICAL: Base ALL generated notes and synthesis *strictly* on the information found in the provided search results or existing notes. DO NOT use any external knowledge or information not present in the context provided to you.**
-
-    # --- Helper Methods ---
+"""
 
     # --- NEW: Helper for tracing original sources ---
     def _get_aggregated_original_sources(self, parent_note_ids: List[str], all_notes_map: Dict[str, Note]) -> List[Dict[str, Any]]:
@@ -288,7 +288,7 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
             # --- Perform Search-Based Research ---
             logger.info(f"{log_prefix}: Performing search-based research for focus questions.")
             # 1. Generate Search Queries asynchronously
-            # TODO: Make query techniques configurable
+
             query_techniques: List[QueryRewritingTechnique] = ["sub_query", "step_back"] # Example techniques
             search_queries, preparer_model_details = await self._generate_section_queries(
                 section=section,
@@ -830,8 +830,7 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
             note_processing_results = await asyncio.gather(*note_generation_tasks)
 
             # Collect results including context
-            # TODO: This method returns a tuple of (Note, context). The Note object will be in the new format.
-            # Ensure that any downstream processing of this method's output is updated to handle the new Note schema.
+
             for note, note_model_details, context_used in note_processing_results: # Unpack 3 values
                 if note and context_used is not None: # Ensure context was captured
                     notes_with_context.append((note, context_used))
@@ -860,10 +859,6 @@ If you DO NOT receive 'Focus Questions' but receive 'Existing Relevant Notes':
         log_queue: Optional[queue.Queue] = None,
         update_callback: Optional[Callable] = None,
     ) -> Tuple[List[str], Optional[Dict[str, Any]]]:
-        """
-        Generates high-quality initial research questions based on the user's request
-        using the 'intelligent' model.
-        """
         self.mission_id = mission_id
         log_prefix = f"{self.agent_name} (Generate Initial Questions)"
         logger.info(f"{log_prefix}: Generating initial questions for request: '{user_request[:100]}...'")
@@ -946,7 +941,7 @@ Now, generate the questions for the provided research request.
 
     # --- NEW: Method for Initial Question Exploration ---
     async def explore_question(
-        # TODO: Add note_level: NoteType = NoteType.LITERATURE to the explore_question method signature
+
         self,
         question: str,
         mission_id: str,
@@ -1302,8 +1297,7 @@ If no relevant sub-questions are identified, return an empty list for "sub_quest
         if not chunks: return [], False
         
         # Combine chunk texts for evaluation
-        chunk_content = "\n\n---
-\n".join([chunk.get("text", "") for chunk in chunks[:5]])  # Use first 5 chunks for evaluation
+        chunk_content = "\n\n---\n".join([chunk.get("text", "") for chunk in chunks[:5]])  # Use first 5 chunks for evaluation
         
         # Use metadata from first chunk to read document, passing callback and registry override
         first_chunk_metadata = chunks[0].get("metadata", {})
@@ -1514,8 +1508,7 @@ If no relevant sub-questions are identified, return an empty list for "sub_quest
                     current_pos = split_end
             else:
                 # Add window as-is
-                window_content = full_content_original[merged_window["start"]:
-merged_window["end"]]
+                window_content = full_content_original[merged_window["start"]:merged_window["end"]]
                 window_obj = {
                     "content": window_content,
                     "beginning_omitted": merged_window["start"] > 0,
@@ -1909,7 +1902,7 @@ merged_window["end"]]
                 elif tool_name == "web_search": # Check against the generic tool name
                     aggregated_results["web"].extend(result_list)
 
-        # TODO: Add deduplication logic here if needed
+
         logger.info(f"Parallel search execution complete. Found {len(aggregated_results['document'])} doc results, {len(aggregated_results['web'])} web results.")
         return aggregated_results, tool_calls_list
 
@@ -1993,16 +1986,7 @@ Important considerations:
                 
                 if response and response.choices and response.choices[0].message.content:
                     evaluation = response.choices[0].message.content.strip().upper()
-                    # TODO: Add logic to generate structured notes based on note_level.
-                    # This will involve creating a dynamic prompt that asks the LLM to generate a JSON object
-                    # matching the new Note schema. The prompt will change based on whether the note_level
-                    # is FLEETING, LITERATURE, or PERMANENT.
 
-                    # For LITERATURE and PERMANENT notes, the prompt should ask for the structured_analysis field to be filled.
-                    # For PERMANENT notes, the prompt should also ask for potential connections to other notes (this will be a placeholder for now).
-
-                    # After getting the JSON response from the LLM, parse it and create a Note object.
-                    # The existing logic for creating a Note object will need to be replaced.
                     
                     if "SUFFICIENT" in evaluation:
                         needs_full_doc = False
@@ -2143,203 +2127,7 @@ Important considerations:
             return None, None, None # Indicate full text not read/needed, no tool call, no file read
 
 
-    async def _generate_note_from_content(
-        self,
-        question_being_explored: str, # New parameter for the specific question context
-        section_id: str, # Still useful for tagging notes, even if derived from question
-        section_description: str, # Can be the question itself or section goal
-        focus_questions: Optional[List[str]], # May be redundant if question_being_explored is primary
-        active_goals: Optional[List[GoalEntry]], # <-- NEW: Add active goals
-        active_thoughts: Optional[List[ThoughtEntry]], # <-- NEW: Add active thoughts
-        source_type: str,
-        source_id: str,
-        source_metadata: Dict,
-        content_to_process: str,
-        is_initial_exploration: bool = False, # Flag to modify prompt for relevance check
-        feedback_callback: Optional[Callable[[Dict[str, Any]], None]] = None, # <-- Add feedback_callback
-        log_queue: Optional[queue.Queue] = None, # <-- Add log_queue
-        update_callback: Optional[Callable] = None, # <-- ADD update_callback
-        tool_registry_override: Optional[ToolRegistry] = None, # <-- Add override parameter (needed for _process_single_result)
-        model: Optional[str] = None # <-- ADD model parameter
-    ) -> Tuple[Optional[Note], Optional[Dict[str, Any]]]:
-        """Uses LLM asynchronously to generate a Note object, returning the note and model call details."""
-        # Note: tool_registry_override is accepted here but not directly used by _generate_note_from_content itself.
-        # It's needed because _process_single_result calls this method and also needs the override for its own tool calls.
-        logger.debug(f"Generating note for question '{question_being_explored}' / section {section_id} from {source_type}: {source_id}")
 
-        # Construct prompt
-        goals_str = "\n".join([f"- Goal ID: {g.goal_id}, Status: {g.status}, Text: {g.text}" for g in active_goals]) if active_goals else "None"
-        thoughts_str = "\n".join([f"- [{t.timestamp.strftime('%Y-%m-%d %H:%M')}] {t.agent_name}: {t.content}" for t in active_thoughts]) if active_thoughts else "None"
-
-        if is_initial_exploration:
-            # Prompt focused on the specific question during initial exploration, including thoughts
-            prompt = f"""
-You are analyzing content related to the specific research question: "{question_being_explored}"
-
-**CRITICAL: Remember the overall mission goals and recent thoughts, ensuring your analysis aligns with them:**
----
-Active Goals:
-{goals_str}
----
-Recent Thoughts:
-{thoughts_str}
----
-
-Content Source Details:
-- Type: {source_type}
-- ID: {source_id}
-- Metadata: {json.dumps(source_metadata, indent=2)}
-
-Content to Analyze (first {get_research_note_content_limit(self.mission_id)} chars):
----
-{content_to_process[:get_research_note_content_limit(self.mission_id)]}... 
----
-
-Task: Extract all information directly relevant to answering the specific research question: "{question_being_explored}". Synthesize these findings into a detailed and comprehensive note. Ensure all key details, context, and nuances from the source content that help answer the question are included. 
-
-**CRITICAL INSTRUCTIONS:**
-1. Extract information *only* from the 'Content to Analyze' provided above. Do not infer, assume, or add any information not explicitly present in the text.
-2. Pay special attention to any "Preferred Source Types" mentioned in the Active Goals. If the user has specified preferred source types (e.g., "academic literature", "legal sources", "state law"), prioritize information that aligns with these source preferences.
-3. Output ONLY the detailed note content. 
-4. If the content is IRRELEVANT to the question: Return the text "Content reviewed, but not relevant to the question."
-"""
-        else:
-            # Original prompt focused on section goal (for structured research phase)
-            prompt = f"""
-Analyze the following content obtained from source '{source_id}' (Type: {source_type}).
-The goal is to extract information relevant to the research section, **ensuring it aligns with the overall mission goals and recent thoughts**:
-
-**CRITICAL: Overall Mission Goals & Recent Thoughts (Consult these for relevance, tone, audience, focus):**
----
-Active Goals:
-{goals_str}
----
-Recent Thoughts:
-{thoughts_str}
----
-
-Current Section Details:
-- Section ID: '{section_id}'
-- Section Goal: '{section_description}'
-"""
-            if focus_questions: # Keep focus questions for structured phase
-                prompt += f"\nSpecifically focus on answering these questions if possible: {'; '.join(focus_questions)}\n"
-
-            prompt += f"""
-Source Metadata:
-{json.dumps(source_metadata, indent=2)}
-
-Content to Analyze (first {get_research_note_content_limit(self.mission_id)} chars):
----
-{content_to_process[:get_research_note_content_limit(self.mission_id)]}...
----
-
-Task: Extract all key information relevant to the section goal (and focus questions, if provided). Synthesize these findings into a detailed and comprehensive note. Ensure all key details, context, and nuances from the source content relevant to the goal/questions are included.
-
-**CRITICAL INSTRUCTIONS:**
-1. Extract information *only* from the 'Content to Analyze' provided above. Do not infer, assume, or add any information not explicitly present in the text.
-2. Pay special attention to any "Preferred Source Types" mentioned in the Active Goals. If the user has specified preferred source types (e.g., "academic literature", "legal sources", "state law"), prioritize information that aligns with these source preferences.
-3. Output ONLY the detailed note content. Do not include explanations, apologies, or introductory phrases like "The note is...".
-4. If the content excerpt is irrelevant to the section goal/questions or contains no clear relevant point, return the text "Content reviewed, but not relevant to the section goal/questions."
-"""
- 
-        # --- Add logging before LLM call ---
-        logger.info(f"Content being sent to LLM for note generation (source: {source_id}, total length: {len(content_to_process)}, first 500 chars): {repr(content_to_process[:500])}")
-        logger.debug(f"Full prompt for note generation (source: {source_id}):\n{prompt}")
-        # --- End added logging ---
-
-        messages = [{"role": "user", "content": prompt}]
-        model_call_details = None
-        try:
-            # Await the async LLM call
-            response, model_call_details = await self._call_llm(
-                user_prompt=prompt, # Pass the constructed prompt
-                agent_mode="research", # Use research model
-                log_queue=log_queue if 'log_queue' in locals() else None, # Pass log_queue for UI updates
-                update_callback=update_callback, # <-- Pass correct update_callback
-                model=model, # <-- Pass the model parameter down
-                log_llm_call=True # Enable logging for cost tracking of individual note generation
-            )
-            note_content = ""
-            raw_llm_response_content = "" # <-- Add variable to store raw response
-            if response and response.choices and response.choices[0].message.content:
-                 raw_llm_response_content = response.choices[0].message.content # <-- Store raw response
-                 note_content = raw_llm_response_content.strip()
-
-            # --- Add logging after LLM call ---
-            # logger.info(f"LLM raw response for note generation (source: {source_id}): {repr(raw_llm_response_content)}")
-            # logger.info(f"Stripped note content (source: {source_id}): {repr(note_content)}")
-            # --- End added logging ---
-
-
-            # Check if the LLM indicated irrelevance or returned actual content
-            irrelevance_markers = [
-                "content reviewed, but not relevant to the question.",
-                "content reviewed, but not relevant to the section goal/questions."
-            ]
-            is_irrelevant = any(marker in note_content.lower() for marker in irrelevance_markers)
-
-            if note_content and not is_irrelevant:
-                # Map 'document_window' to 'document' for Note schema validation
-                actual_source_type = "document" if source_type == "document_window" else source_type
-                # Ensure actual_source_type is one of the allowed literals
-                if actual_source_type not in ["document", "web", "internal"]:
-                    logger.error(f"Invalid source type '{actual_source_type}' derived from '{source_type}' for note creation.")
-                    return None, model_call_details # Cannot create note
-
-                try:
-                    from ai_researcher.config import get_current_time
-                    now = get_current_time()
-                    new_note = Note(
-                        content=note_content,
-                        source_type=actual_source_type, # Use mapped type
-                        source_id=source_id,
-                        source_metadata=source_metadata,
-                        potential_sections=[section_id], # Removed is_relevant field
-                        created_at=now,
-                        updated_at=now
-                    )
-                except ValidationError as e:
-                     logger.error(f"Pydantic validation failed creating Note for source {source_id}: {e}")
-                     return None, model_call_details # Return None if validation fails
-
-                log_msg = f"Generated relevant note {new_note.note_id}"
-                if is_initial_exploration:
-                    log_msg += f" for question '{question_being_explored}'."
-                else:
-                    log_msg += f" for section {section_id}."
-                logger.info(log_msg)
-                return new_note, model_call_details
-            elif is_irrelevant:
-                # LLM explicitly stated irrelevance
-                log_msg = f"Content from source {source_id} explicitly deemed irrelevant by LLM"
-                if is_initial_exploration:
-                    log_msg += f" to question '{question_being_explored}'."
-                else:
-                    log_msg += f" to section {section_id} goal."
-                logger.info(log_msg)
-                # Add specific log for why fetcher won't be called
-                if source_type == "web":
-                    logger.info(f"Web content fetch skipped for {source_id} because snippet was deemed irrelevant by LLM.")
-                # Return None for the note, but still return model details
-                return None, model_call_details
-            else: # note_content was empty or only whitespace
-                # LLM returned empty or whitespace response
-                log_msg = f"LLM returned empty/whitespace response for source {source_id}, indicating irrelevance or issue."
-                if is_initial_exploration:
-                    log_msg += f" (Question: '{question_being_explored}')"
-                else:
-                    log_msg += f" to section {section_id} goal."
-                logger.info(log_msg)
-                # Add specific log for why fetcher won't be called
-                if source_type == "web":
-                    logger.info(f"Web content fetch skipped for {source_id} because LLM returned empty/whitespace response for snippet.")
-                # Return None for the note, but still return model details
-                return None, model_call_details
-        except Exception as e:
-            logger.error(f"Async LLM call failed during note generation for source {source_id}: {e}", exc_info=True)
-            # Return None for the note, but still return model details if available
-            return None, model_call_details
 
 
     async def _process_single_result(
@@ -2355,7 +2143,8 @@ Task: Extract all key information relevant to the section goal (and focus questi
         log_queue: Optional[queue.Queue] = None, # <-- Add log_queue
         update_callback: Optional[Callable] = None, # <-- ADD update_callback
         tool_registry_override: Optional[ToolRegistry] = None, # <-- Add override parameter
-        model: Optional[str] = None # <-- ADD model parameter
+        model: Optional[str] = None, # <-- ADD model parameter
+        note_level: NoteType = NoteType.LITERATURE # <-- NEW: Add note_level
     ) -> Tuple[Optional[Note], Optional[Dict[str, Any]], Optional[str]]:
         """
         Processes a single search result (web or document_window) using the provided/default registry.
@@ -2366,6 +2155,7 @@ Task: Extract all key information relevant to the section goal (and focus questi
         Returns:
             Tuple: (Relevant_Note | None, model_call_details | None, context_used_for_note | None)
         """
+
         context_used_for_note: Optional[str] = None # Initialize context capture
         # Determine the primary question/goal for note generation based on the phase
         question_or_goal = section.description if not is_initial_exploration else (focus_questions[0] if focus_questions else section.description)
@@ -2411,26 +2201,183 @@ Task: Extract all key information relevant to the section goal (and focus questi
             return None, None, None # Return tuple (note, details, context)
 
         # Generate note from the initial content (snippet or window), passing the specific question for relevance check if needed
-        logger.info(f"Calling _generate_note_from_content for source {source_id} using initial content. Length: {len(initial_content_to_process)}")
+        logger.info(f"Generating structured note for source {source_id} using initial content. Length: {len(initial_content_to_process)} (Note Level: {note_level.name})")
         context_used_for_note = initial_content_to_process # Capture initial context
-        note, note_model_details = await self._generate_note_from_content(
-            question_being_explored=question_or_goal, # Pass the relevant question/goal
-            section_id=section.section_id,
-            section_description=section.description, # Keep original section desc for context if needed
-            focus_questions=focus_questions, # Pass along focus questions
-            active_goals=active_goals, # <-- Pass active_goals
-            active_thoughts=active_thoughts, # <-- Pass active thoughts
+
+        # Prepare LLM prompt based on note_level
+        prompt_template = """
+You are an expert research assistant. Your task is to extract and synthesize information from the provided content snippet, answering the given focus questions.
+
+**Goal:** Generate a structured note in JSON format based on the 'Note Level' specified below.
+
+**Content Source:** {source_type} (ID: {source_id})
+**Focus Question(s):** {focus_questions_str}
+**Relevant Content:**
+---
+{content}
+---
+
+**Note Level:** {note_level_name}
+
+**Instructions for JSON Output:**
+You MUST output a JSON object with the following structure. Pay close attention to which fields are required or optional based on the 'Note Level'.
+
+```json
+{{
+  "content": "string", // The core information of the note, directly answering the focus question(s) from the 'Relevant Content'.
+  "note_type": "FLEETING" | "LITERATURE" | "PERMANENT", // Must be one of these values.
+  "focus_question": "string", // The specific focus question this note primarily addresses. If multiple, pick the most relevant.
+  "source_type": "document" | "web" | "internal", // Must be 'document' or 'web' for this task.
+  "source_id": "string", // A unique identifier for the source (e.g., doc_id for documents, URL for web).
+  "source_metadata": {{...}}, // A JSON object containing relevant metadata from the source. Include 'title', 'url' (if web), 'original_filename' (if document), and other useful context.
+  "structured_analysis": "string" | null, // Critical analysis, implications, connection to other notes/goals.
+  "connections": ["string"] | null // List of source_ids of other relevant notes or concepts.
+}}
+```
+
+**Specific Requirements based on Note Level:**
+
+*   **FLEETING (Note Level: FLEETING)**
+    *   `content`: Direct extraction or very brief summary of relevant information.
+    *   `structured_analysis`: MUST be `null`.
+    *   `connections`: MUST be `null`.
+
+*   **LITERATURE (Note Level: LITERATURE)**
+    *   `content`: Summarize and paraphrase information, synthesizing key points.
+    *   `structured_analysis`: REQUIRED. Provide a concise critical analysis of the information, its implications, or how it relates to the section goal. Explain its significance.
+    *   `connections`: MUST be `null`.
+
+*   **PERMANENT (Note Level: PERMANENT)**
+    *   `content`: Synthesize information into original insights, arguments, or refined concepts.
+    *   `structured_analysis`: REQUIRED. Provide a thorough, deep analysis. Discuss broader implications, integrate with existing knowledge, and highlight novel perspectives.
+    *   `connections`: REQUIRED. List `source_id`s of other relevant notes or concepts that this note connects with (e.g., `["doc_X", "web_Y"]`). If no clear connections, return an empty array `[]`.
+
+**Ensure the following:**
+- The note's `content` directly addresses the focus question(s).
+- The `note_type` field in the JSON output matches the requested 'Note Level' specified above.
+- All strings are properly escaped for JSON.
+- DO NOT include any commentary or text outside the JSON block.
+"""
+        
+        # Prepare content and focus questions for the prompt
+        focus_questions_str = "\n- ".join(focus_questions) if focus_questions else "None"
+        
+        # Limit content to process to fit within context window
+        max_content_for_prompt = get_research_note_content_limit(self.mission_id) # Using the dynamic config here
+        
+        # Truncate content to avoid exceeding token limits, ensuring we don't cut in the middle of a word badly
+        # Prioritize keeping the beginning if no natural break is found.
+        truncated_content = initial_content_to_process
+        if len(initial_content_to_process) > max_content_for_prompt:
+            truncated_content = initial_content_to_process[:max_content_for_prompt].rsplit(' ', 1)[0] + "..." if ' ' in initial_content_to_process[:max_content_for_prompt] else initial_content_to_process[:max_content_for_prompt] + "..."
+            logger.warning(f"Truncated content for prompt from {len(initial_content_to_process)} to {len(truncated_content)} characters to fit LLM context.")
+
+
+        full_llm_prompt = prompt_template.format(
             source_type=source_type,
             source_id=source_id,
-            source_metadata=source_metadata,
-            content_to_process=initial_content_to_process, # Use initial content here
-            is_initial_exploration=is_initial_exploration, # Pass the flag
-            feedback_callback=feedback_callback, # Pass feedback_callback
-            log_queue=log_queue, # Pass log_queue
-            update_callback=update_callback, # <-- Pass update_callback
-            tool_registry_override=tool_registry_override, # Pass override (needed by signature)
-            model=model # <-- Pass model parameter
+            focus_questions_str=focus_questions_str,
+            content=truncated_content,
+            note_level_name=note_level.name # Pass the name of the enum for clear instructions
         )
+
+        model_call_details = {}
+        generated_note: Optional[Note] = None
+        
+        try:
+            llm_response, model_call_details = await self._call_llm(
+                user_prompt=full_llm_prompt,
+                agent_mode="research", # Use research model
+                response_format={"type": "json_object"},
+                log_queue=log_queue,
+                update_callback=update_callback,
+                log_llm_call=True,
+                model=model # Use the passed model
+            )
+
+            if llm_response and llm_response.choices and llm_response.choices[0].message.content:
+                json_str = llm_response.choices[0].message.content
+                logger.debug(f"Raw LLM response JSON for note generation: {json_str[:500]}...") # Log first 500 chars
+                
+                parsed_note_data = parse_llm_json_response(json_str)
+
+                # Validate essential fields are present
+                if not all(k in parsed_note_data for k in ["content", "note_type", "focus_question", "source_type", "source_id", "source_metadata"]):
+                    raise ValueError("LLM response missing essential fields for Note schema.")
+                
+                # Further validation for specific note types
+                if parsed_note_data["note_type"] == NoteType.LITERATURE.name and parsed_note_data.get("structured_analysis") is None:
+                    logger.warning("LITERATURE note_type requires 'structured_analysis', but it was null. Attempting to generate a placeholder.")
+                    parsed_note_data["structured_analysis"] = "Brief analysis: This note summarizes key points from the source. Further critical evaluation is needed to fully integrate it."
+                
+                if parsed_note_data["note_type"] == NoteType.PERMANENT.name:
+                    if parsed_note_data.get("structured_analysis") is None:
+                        logger.warning("PERMANENT note_type requires 'structured_analysis', but it was null. Attempting to generate a placeholder.")
+                        parsed_note_data["structured_analysis"] = "Deep analysis: This note synthesizes original insights. Further development of a comprehensive analysis is needed."
+                    if parsed_note_data.get("connections") is None:
+                        logger.warning("PERMANENT note_type requires 'connections', but it was null. Defaulting to empty list.")
+                        parsed_note_data["connections"] = []
+
+
+                # Convert note_type string to NoteType enum
+                parsed_note_data["note_type"] = NoteType[parsed_note_data["note_type"]]
+
+                # Ensure source_metadata is a dict
+                if not isinstance(parsed_note_data.get("source_metadata"), dict):
+                    logger.warning(f"source_metadata was not a dictionary for source {source_id}. Converting to empty dict.")
+                    parsed_note_data["source_metadata"] = {}
+
+                # --- Transform LLM response to match Note schema ---
+                # Extract and remove fields not in Note schema (extra='forbid')
+                extra_fields = extract_non_schema_fields(parsed_note_data, Note)
+                for field_name in extra_fields:
+                    parsed_note_data.pop(field_name, None)
+                if extra_fields:
+                    logger.debug(f"Removed non-schema fields from LLM response: {list(extra_fields.keys())}")
+
+                # Convert structured_analysis from string to NoteAnalysis object
+                if parsed_note_data.get("structured_analysis") is not None:
+                    sa_value = parsed_note_data["structured_analysis"]
+                    if isinstance(sa_value, str):
+                        parsed_note_data["structured_analysis"] = NoteAnalysis(
+                            core_argument=sa_value,
+                            key_findings=[],
+                            quotes=[]
+                        )
+                    elif isinstance(sa_value, dict):
+                        parsed_note_data["structured_analysis"] = NoteAnalysis(**sa_value)
+                # --- End transformation ---
+
+                generated_note = Note(**parsed_note_data)
+                
+                logger.info(f"Successfully generated structured note {generated_note.note_id} of type {generated_note.note_type.name}.")
+                
+            else:
+                logger.warning(f"LLM did not return a valid JSON response for note generation for source {source_id}.")
+                # This could be due to irrelevance, or an error in LLM generation.
+                # Treat as irrelevant for now.
+                model_call_details["error"] = "LLM returned empty or invalid response."
+
+        except ValidationError as e:
+            logger.error(f"Pydantic validation failed for generated note from source {source_id}: {e}. Raw LLM response: {json_str}", exc_info=True)
+            model_call_details["error"] = f"Note validation failed: {e}"
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON for generated note from source {source_id}: {e}. Raw LLM response: {json_str}", exc_info=True)
+            model_call_details["error"] = f"JSON parsing failed: {e}"
+        except Exception as e:
+            logger.error(f"Error during structured note generation for source {source_id}: {e}", exc_info=True)
+            model_call_details["error"] = f"Structured note generation failed: {e}"
+
+        if generated_note:
+            note = generated_note
+            note_model_details = model_call_details
+        else:
+            # If structured generation failed, try to fall back to _generate_note_from_content_old if it still exists
+            # For now, just return None if structured generation fails.
+            logger.warning(f"Structured note generation failed for source {source_id}. Returning None.")
+            note = None
+            note_model_details = model_call_details # Still include model call details even if note is None
+
 
         # --- UI Feedback: Note Generated ---
         if note and feedback_callback:

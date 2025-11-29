@@ -21,7 +21,7 @@ from ai_researcher.config import get_current_time
 from ai_researcher import config
 from ai_researcher.agentic_layer.schemas.planning import SimplifiedPlan, PlanStep, ReportSection # <-- Import ReportSection
 from ai_researcher.agentic_layer.schemas.research import ResearchResultResponse
-from ai_researcher.agentic_layer.schemas.notes import Note # <-- Import Note schema
+from ai_researcher.agentic_layer.schemas.notes import Note, NoteRevision, NotesCritiqueOutput, VerificationStatus # <-- Import Note schema and critique types
 from ai_researcher.agentic_layer.schemas.thought import ThoughtEntry 
 from ai_researcher.agentic_layer.schemas.goal import GoalEntry
 
@@ -987,6 +987,146 @@ class AsyncContextManager:
                 logger.warning(f"Attempted to remove notes, but none of the specified IDs were found in mission {mission_id}. IDs: {note_ids_to_remove}")
         else:
             logger.error(f"Cannot remove notes for non-existent mission ID: {mission_id}")
+
+    async def revise_note(
+        self, 
+        mission_id: str, 
+        note_id: str, 
+        new_content: str, 
+        agent_name: str, 
+        reason: str, 
+        structured_analysis: Optional[Any] = None
+    ):
+        """
+        Updates a note with new content and tracks the revision history.
+        Persists the updated context to the database.
+        """
+        mission = self.get_mission_context(mission_id)
+        if not mission:
+             logger.error(f"Cannot revise note: Mission {mission_id} not found.")
+             return
+
+        note_found = False
+        target_note = None
+        for note in mission.notes:
+            if note.note_id == note_id:
+                # Create revision entry
+                revision = NoteRevision(
+                    agent_name=agent_name,
+                    change_type="content" if not structured_analysis else "structured_analysis",
+                    original_value=note.content,
+                    new_value=new_content,
+                    feedback=reason,
+                    timestamp=get_current_time()
+                )
+                note.revision_history.append(revision)
+                
+                # Update content
+                note.content = new_content
+                if structured_analysis:
+                     note.structured_analysis = structured_analysis
+                
+                note.updated_at = get_current_time()
+                target_note = note
+                note_found = True
+                break
+        
+        if note_found and target_note:
+             mission.update_timestamp()
+             async with get_async_db() as db:
+                try:
+                    sanitized_context = sanitize_for_jsonb(mission.model_dump(mode='json'))
+                    await crud.update_mission_context(db, mission_id=mission_id, mission_context=sanitized_context)
+                    logger.info(f"Revised note {note_id} in mission {mission_id} by {agent_name}")
+                except Exception as e:
+                    logger.error(f"Database error revising note {note_id}: {e}", exc_info=True)
+             
+             # Send WebSocket update using the same logic as add_note
+             try:
+                from api.missions import transform_note_for_frontend
+                import asyncio
+                
+                # Wrapper for sending update
+                async def send_update():
+                    note_dict = await transform_note_for_frontend(target_note)
+                    # Using "update" action if supported, or "append" (might duplicate if frontend doesn't handle ID match)
+                    # Usually "update" is handled by frontend if ID exists
+                    await send_notes_update(mission_id, [note_dict], "update") 
+                
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.create_task(send_update())
+                except RuntimeError:
+                    import threading
+                    def run_sync():
+                        asyncio.run(send_update())
+                    threading.Thread(target=run_sync, daemon=True).start()
+                    
+                logger.debug(f"Sent note update via WebSocket for note {note_id}")
+             except Exception as ws_error:
+                logger.error(f"Failed to send note update via WebSocket: {ws_error}")
+        else:
+             logger.warning(f"Note {note_id} not found in mission {mission_id} for revision")
+
+    async def update_note_verification(
+        self, 
+        mission_id: str, 
+        note_id: str, 
+        status: VerificationStatus, 
+        feedback: str, 
+        critique_result: Optional[NotesCritiqueOutput] = None
+    ):
+        """Updates note verification status and adds critique result."""
+        mission = self.get_mission_context(mission_id)
+        if not mission:
+             logger.error(f"Cannot update verification: Mission {mission_id} not found.")
+             return
+        
+        note_found = False
+        target_note = None
+        for note in mission.notes:
+            if note.note_id == note_id:
+                note.verification_status = status
+                note.verification_feedback = feedback
+                if critique_result:
+                    note.critique_results.append(critique_result)
+                note.updated_at = get_current_time()
+                target_note = note
+                note_found = True
+                break
+        
+        if note_found and target_note:
+             mission.update_timestamp()
+             async with get_async_db() as db:
+                 try:
+                    sanitized_context = sanitize_for_jsonb(mission.model_dump(mode='json'))
+                    await crud.update_mission_context(db, mission_id=mission_id, mission_context=sanitized_context)
+                    logger.info(f"Updated verification for note {note_id} to {status}")
+                 except Exception as e:
+                    logger.error(f"Database error updating verification for note {note_id}: {e}", exc_info=True)
+             
+             # Send WebSocket update
+             try:
+                from api.missions import transform_note_for_frontend
+                import asyncio
+                
+                async def send_update():
+                    note_dict = await transform_note_for_frontend(target_note)
+                    await send_notes_update(mission_id, [note_dict], "update")
+                
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.create_task(send_update())
+                except RuntimeError:
+                    import threading
+                    def run_sync():
+                        asyncio.run(send_update())
+                    threading.Thread(target=run_sync, daemon=True).start()
+             except Exception as ws_error:
+                logger.error(f"Failed to send note verification update: {ws_error}")
+        else:
+             logger.warning(f"Note {note_id} not found in mission {mission_id} for verification update")
+
 
     # --- Scratchpad Management Methods ---
 
