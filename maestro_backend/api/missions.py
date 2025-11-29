@@ -3347,3 +3347,65 @@ async def get_mission_document_group(
     except Exception as e:
         logger.error(f"Failed to get document group for mission {mission_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get document group: {str(e)}")
+
+@router.patch("/missions/{mission_id}/research-params")
+async def update_mission_research_params(
+    mission_id: str,
+    params_update: Dict[str, Any],
+    current_user: User = Depends(get_current_user_from_cookie),
+    context_mgr: AsyncContextManager = Depends(get_context_manager)
+):
+    """
+    Update specific research parameters for a mission dynamically.
+    This allows the frontend to toggle settings like 'note_level' (FLEETING/LITERATURE/PERMANENT)
+    during a running mission.
+    """
+    try:
+        mission_context = context_mgr.get_mission_context(mission_id)
+        if not mission_context:
+            raise HTTPException(
+                status_code=404,
+                detail="Mission not found"
+            )
+        
+        # Update the params in memory
+        if mission_context.research_params is None:
+            mission_context.research_params = {}
+        
+        # Apply updates
+        mission_context.research_params.update(params_update)
+        
+        # Ensure consistency: Update metadata's copy of research_params as well
+        # This is important because update_mission_metadata persists the whole object,
+        # but we want to ensure the 'metadata' field specifically reflects the current state.
+        metadata_update = {}
+        if "research_params" in mission_context.metadata:
+             # If it exists, update it
+             if isinstance(mission_context.metadata["research_params"], dict):
+                 mission_context.metadata["research_params"].update(params_update)
+                 metadata_update["research_params"] = mission_context.metadata["research_params"]
+             else:
+                 # If it's not a dict (unlikely), overwrite it
+                 metadata_update["research_params"] = mission_context.research_params
+        else:
+             # If it doesn't exist in metadata, add it
+             metadata_update["research_params"] = mission_context.research_params
+
+        # Persist changes
+        await context_mgr.update_mission_metadata(mission_id, metadata_update)
+        
+        logger.info(f"Dynamically updated research params for mission {mission_id}: {params_update}")
+        
+        return {
+            "message": "Research parameters updated successfully", 
+            "research_params": mission_context.research_params
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update research params: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update research params"
+        )

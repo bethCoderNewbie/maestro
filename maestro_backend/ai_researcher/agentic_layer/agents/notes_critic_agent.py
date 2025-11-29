@@ -64,7 +64,7 @@ class NotesCriticAgent(BaseAgent):
 
     def _default_system_prompt(self) -> str:
         """Generates the default system prompt for the Notes Critic Agent."""
-        return """You are a meticulous Research Auditor. Your task is to verify the quality, accuracy, and alignment of a research note against its source material and the mission's goals.
+        return """You are a meticulous Research Auditor. Your task is to verify the quality, accuracy, and alignment of a research note against its source material and the mission's goals. You do not generate new content; you rigorously critique existing content.
 
 Your primary responsibilities are:
 1. **Hallucination Detection:** Verify if the note's claims are supported by the provided 'Source Context'. Flag any information that is not present in the source.

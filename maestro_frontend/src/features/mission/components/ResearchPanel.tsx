@@ -1,18 +1,6 @@
-import React, { useEffect, useCallback, useRef } from 'react'
-import { useChatStore } from '../../chat/store'
-import { useMissionStore } from '../store'
-import { ResearchTabs } from './ResearchTabs'
-import { Button } from '../../../components/ui/button'
-import { PanelHeader } from '../../../components/ui/PanelHeader'
-import { PanelControls } from '../../../components/ui/PanelControls'
-import { usePanelControls } from '../../../components/layout/SplitPaneLayout'
-import { useToast } from '../../../components/ui/toast'
-import { useResearchWebSocket } from '../../../services/websocket'
-import { apiClient } from '../../../config/api'
-import { MissionHeaderStats } from '../../../components/mission'
-import { ensureDate } from '../../../utils/timezone'
 import { FileSearch, MessageSquare, Play, Square, RotateCcw, FolderPlus, ExternalLink } from 'lucide-react'
 import { UnifiedResumeModal } from './UnifiedResumeModal'
+import { NoteLevelSelector } from './NoteLevelSelector'
 
 export const ResearchPanel: React.FC = () => {
   const { activeChat } = useChatStore()
@@ -411,6 +399,11 @@ export const ResearchPanel: React.FC = () => {
         icon={<FileSearch className="h-5 w-5 text-primary" />}
         actions={
           <div className="flex items-center space-x-4">
+            {/* Note Level Selector */}
+            {activeChat?.missionId && (
+              <NoteLevelSelector missionId={activeChat.missionId} />
+            )}
+
             {/* Status indicator on the right */}
             <div className="flex items-center space-x-2 px-2 py-0.5 bg-muted/50 rounded-md">
               <div className={`w-2.5 h-2.5 rounded-full ${getStatusColor(currentMission?.status)}`}></div>

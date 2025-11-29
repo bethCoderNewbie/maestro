@@ -91,6 +91,7 @@ interface MissionState {
   clearActiveMission: () => void
   updateMissionContext: (missionId: string, context: Partial<MissionContext>) => void
   fetchMissionContext: (missionId: string) => Promise<void>
+  updateMissionResearchParams: (missionId: string, params: Record<string, any>) => Promise<void>
   loadMissionsFromDB: () => Promise<void>
   saveMissionToDB: (mission: Mission) => Promise<void>
 }
@@ -860,6 +861,46 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       }
     } catch (error) {
       console.error('Failed to fetch mission context:', error)
+    }
+  },
+
+  updateMissionResearchParams: async (missionId: string, params: Record<string, any>) => {
+    try {
+      const response = await apiClient.patch(`/api/missions/${missionId}/research-params`, params)
+      
+      set((state) => {
+        const updatedMissions = state.missions.map((mission) => {
+          if (mission.id === missionId) {
+            const updatedMetadata = {
+              ...(mission.metadata || {}),
+              research_params: {
+                ...(mission.metadata?.research_params || {}),
+                ...response.data.research_params
+              }
+            }
+            return { ...mission, metadata: updatedMetadata }
+          }
+          return mission
+        })
+        
+        const activeMission = state.activeMission?.id === missionId
+          ? updatedMissions.find(m => m.id === missionId) || null
+          : state.activeMission
+          
+        // Save to DB
+        const updatedMission = updatedMissions.find(m => m.id === missionId)
+        if (updatedMission) {
+          persistMissionData(updatedMission)
+        }
+
+        return {
+          missions: updatedMissions,
+          activeMission
+        }
+      })
+    } catch (error) {
+      console.error('Failed to update research params:', error)
+      throw error
     }
   },
 }))
